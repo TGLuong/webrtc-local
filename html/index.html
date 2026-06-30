@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WebRTC Camera</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101214;
+      color: #f4f7f8;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      background: #191d20;
+      border-bottom: 1px solid #2b3136;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    main {
+      display: grid;
+      place-items: center;
+      padding: 18px;
+    }
+
+    video {
+      width: min(100%, 1280px);
+      max-height: calc(100vh - 110px);
+      aspect-ratio: 16 / 9;
+      background: #050607;
+      border: 1px solid #2b3136;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid #4f8cff;
+      background: #2f6fed;
+      color: white;
+      border-radius: 6px;
+      padding: 9px 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
+
+    #status {
+      color: #a9b4bd;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WebRTC Camera</h1>
+    <span id="status">Idle</span>
+    <button id="connect" type="button">Connect</button>
+  </header>
+
+  <main>
+    <video id="remoteVideo" autoplay playsinline controls muted></video>
+  </main>
+
+  <script>
+    const connectButton = document.getElementById("connect");
+    const statusText = document.getElementById("status");
+    const remoteVideo = document.getElementById("remoteVideo");
+
+    let peerConnection;
+
+    function setStatus(message) {
+      statusText.textContent = message;
+    }
+
+    function logSdp(label, payload) {
+      console.groupCollapsed(label);
+      console.log(payload);
+      if (payload && payload.sdp) {
+        console.log(payload.sdp);
+      }
+      console.groupEnd();
+    }
+
+    function logVideoEvent(event) {
+      console.log("video element event", event.type, {
+        readyState: remoteVideo.readyState,
+        videoWidth: remoteVideo.videoWidth,
+        videoHeight: remoteVideo.videoHeight,
+        currentTime: remoteVideo.currentTime,
+        paused: remoteVideo.paused,
+        error: remoteVideo.error
+      });
+    }
+
+    ["loadedmetadata", "resize", "playing", "waiting", "stalled", "error"].forEach((eventName) => {
+      remoteVideo.addEventListener(eventName, logVideoEvent);
+    });
+
+    function logReceivers(pc) {
+      for (const transceiver of pc.getTransceivers()) {
+        console.log("transceiver", {
+          mid: transceiver.mid,
+          direction: transceiver.direction,
+          currentDirection: transceiver.currentDirection,
+          receiverTrackKind: transceiver.receiver.track && transceiver.receiver.track.kind,
+          receiverTrackReadyState: transceiver.receiver.track && transceiver.receiver.track.readyState,
+          receiverTrackMuted: transceiver.receiver.track && transceiver.receiver.track.muted
+        });
+        console.log("receiver parameters", transceiver.receiver.getParameters());
+      }
+    }
+
+    async function logWebRtcStats(pc) {
+      const stats = await pc.getStats();
+      const codecs = new Map();
+      const inboundVideos = [];
+      const candidatePairs = [];
+      const tracks = [];
+
+      for (const stat of stats.values()) {
+        if (stat.type === "codec") {
+          codecs.set(stat.id, stat);
+        } else if (stat.type === "inbound-rtp" && (stat.kind === "video" || stat.mediaType === "video")) {
+          inboundVideos.push(stat);
+        } else if (stat.type === "candidate-pair" && (stat.nominated || stat.state === "succeeded")) {
+          candidatePairs.push(stat);
+        } else if (stat.type === "track" && stat.kind === "video") {
+          tracks.push(stat);
+        }
+      }
+
+      console.groupCollapsed("WebRTC stats");
+      console.log("candidate-pairs", candidatePairs);
+      console.log("inbound-video", inboundVideos.map((stat) => ({
+        id: stat.id,
+        codec: codecs.get(stat.codecId),
+        packetsReceived: stat.packetsReceived,
+        packetsLost: stat.packetsLost,
+        bytesReceived: stat.bytesReceived,
+        framesReceived: stat.framesReceived,
+        framesDecoded: stat.framesDecoded,
+        keyFramesDecoded: stat.keyFramesDecoded,
+        framesDropped: stat.framesDropped,
+        totalDecodeTime: stat.totalDecodeTime,
+        decoderImplementation: stat.decoderImplementation,
+        pliCount: stat.pliCount,
+        nackCount: stat.nackCount,
+        firCount: stat.firCount
+      })));
+      console.log("video-tracks", tracks);
+      console.groupEnd();
+    }
+
+    async function connect() {
+      connectButton.disabled = true;
+      setStatus("Creating offer");
+
+      peerConnection = new RTCPeerConnection({
+        iceServers: []
+      });
+
+      peerConnection.addTransceiver("video", { direction: "recvonly" });
+
+      peerConnection.ontrack = (event) => {
+        console.log("track event", {
+          trackKind: event.track.kind,
+          trackId: event.track.id,
+          trackReadyState: event.track.readyState,
+          trackMuted: event.track.muted,
+          streamIds: event.streams.map((stream) => stream.id)
+        });
+        event.track.onmute = () => console.log("track mute", event.track.id);
+        event.track.onunmute = () => console.log("track unmute", event.track.id);
+        event.track.onended = () => console.log("track ended", event.track.id);
+
+        const [stream] = event.streams;
+        remoteVideo.srcObject = stream;
+        remoteVideo.play().catch((error) => console.warn("video play failed", error));
+        setStatus("Receiving video");
+      };
+
+      peerConnection.oniceconnectionstatechange = () => console.log("iceConnectionState", peerConnection.iceConnectionState);
+      peerConnection.onsignalingstatechange = () => console.log("signalingState", peerConnection.signalingState);
+      peerConnection.onconnectionstatechange = () => {
+        console.log("connectionState", peerConnection.connectionState);
+        setStatus(peerConnection.connectionState);
+        logReceivers(peerConnection);
+        if (["failed", "closed", "disconnected"].includes(peerConnection.connectionState)) {
+          connectButton.disabled = false;
+        }
+      };
+
+      const statsTimer = setInterval(() => {
+        if (!peerConnection || peerConnection.connectionState === "closed") {
+          clearInterval(statsTimer);
+          return;
+        }
+
+        logWebRtcStats(peerConnection).catch((error) => console.warn("getStats failed", error));
+      }, 1000);
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      setStatus("Sending offer");
+      const requestPayload = { sdp: peerConnection.localDescription.sdp };
+      logSdp("SDP request", requestPayload);
+
+      const response = await fetch("/offer", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(requestPayload)
+      });
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const answer = await response.json();
+      logSdp("SDP response", answer);
+
+      await peerConnection.setRemoteDescription({
+        type: "answer",
+        sdp: answer.sdp
+      });
+      logReceivers(peerConnection);
+    }
+
+    connectButton.addEventListener("click", () => {
+      connect().catch((error) => {
+        console.error(error);
+        setStatus(error.message || "Connection failed");
+        connectButton.disabled = false;
+      });
+    });
+  </script>
+</body>
+</html>
