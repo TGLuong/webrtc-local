@@ -44,7 +44,7 @@ impl WebrtcSession {
             connected: false,
             video_mid: None,
             video_pt,
-            seq_no: SeqNo::new(),
+            seq_no: SeqNo::from(0),
         }
     }
 
@@ -75,23 +75,20 @@ impl Stream for WebrtcSession {
         let mut read_buf = ReadBuf::new(&mut storage);
         while let Poll::Ready(event) = this.udp.poll_recv_from(cx, &mut read_buf) {
             match event {
-                Ok(addr) => {
-                    // log::info!("[WebrtcSession {}] recv {} bytes from {addr}", this.id, read_buf.filled().len());
-                    match Receive::new(Protocol::Udp, addr, this.destination, read_buf.filled()) {
-                        Ok(input) => {
-                            if let Err(e) = this.rtc.handle_input(Input::Receive(Instant::now(), input)) {
-                                log::error!("[WebrtcSession {}] handle_input error: {e:?}", this.id);
-                            }
-                        }
-                        Err(err) => {
-                            log::error!(
-                                "[WebrtcSession {}] invalid udp packet from {addr}, len={}: {err:?}",
-                                this.id,
-                                read_buf.filled().len()
-                            );
+                Ok(addr) => match Receive::new(Protocol::Udp, addr, this.destination, read_buf.filled()) {
+                    Ok(input) => {
+                        if let Err(e) = this.rtc.handle_input(Input::Receive(Instant::now(), input)) {
+                            log::error!("[WebrtcSession {}] handle_input error: {e:?}", this.id);
                         }
                     }
-                }
+                    Err(err) => {
+                        log::error!(
+                            "[WebrtcSession {}] invalid udp packet from {addr}, len={}: {err:?}",
+                            this.id,
+                            read_buf.filled().len()
+                        );
+                    }
+                },
                 Err(err) => {
                     log::error!("[WebrtcSession {}] udp error: {err}", this.id);
                     return Poll::Ready(None);

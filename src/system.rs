@@ -57,7 +57,6 @@ impl Stream for System {
         while let Poll::Ready(event) = this.camera.poll_next_unpin(cx) {
             match event {
                 Some(rtp) => {
-                    log::debug!("[System] rtp from camera: {rtp:?}");
                     this.sessions.on_rtp(rtp);
                     return Self::poll_result_after_camera_rtp();
                 }

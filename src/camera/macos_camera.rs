@@ -120,7 +120,6 @@ impl Stream for MacosCamera {
                     if let Some((y, u, v)) = Self::yuyv_to_yuv420p(buffer.buffer(), width, height) {
                         let yuv = YUVSlices::new((&y, &u, &v), (width, height), (width, width / 2, width / 2));
                         if let Ok(h264_bitstream) = this.encoder.encode(&yuv) {
-                            log::debug!("h264: {:02x?}", h264_bitstream.to_vec());
                             if let Ok(packets) = this.packetizer.packetize(&h264_bitstream.to_vec().into(), 3000) {
                                 for packet in packets.into_iter() {
                                     let rtp = RtpPacket {
@@ -129,7 +128,6 @@ impl Stream for MacosCamera {
                                         marker: packet.header.marker,
                                         payload: packet.payload,
                                     };
-                                    log::debug!("rtp: {rtp:?}");
                                     this.outputs.push_back(rtp);
                                 }
                             }
