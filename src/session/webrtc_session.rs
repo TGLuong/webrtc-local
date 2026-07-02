@@ -14,7 +14,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::transport::rtp::RtpPacket;
+use crate::{session::WebrtcSessionEvent, transport::rtp::RtpPacket};
 
 #[derive(Debug)]
 pub struct WebrtcSession {
@@ -66,7 +66,7 @@ impl WebrtcSession {
 }
 
 impl Stream for WebrtcSession {
-    type Item = ();
+    type Item = WebrtcSessionEvent;
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -110,6 +110,7 @@ impl Stream for WebrtcSession {
                         str0m::Event::Connected => {
                             log::info!("[WebrtcSession {}] connected", this.id);
                             this.connected = true;
+                            return Poll::Ready(Some(WebrtcSessionEvent::Connected(this.id)));
                         }
                         str0m::Event::MediaAdded(media_added) => match media_added.kind {
                             str0m::media::MediaKind::Audio => {
@@ -129,6 +130,7 @@ impl Stream for WebrtcSession {
                         str0m::Event::Closed => {
                             log::info!("[WebrtcSession {}] closed", this.id);
                             this.connected = false;
+                            return Poll::Ready(Some(WebrtcSessionEvent::Closed(this.id)));
                         }
                         other => {
                             log::info!("[WebrtcSession {}] event {other:?}", this.id);

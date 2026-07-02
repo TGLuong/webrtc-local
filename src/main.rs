@@ -8,6 +8,7 @@ use tracing_subscriber::{EnvFilter, fmt::time::LocalTime};
 use crate::system::System;
 
 pub mod camera;
+pub mod rtsp;
 pub mod session;
 pub mod system;
 pub mod transport;

@@ -5,7 +5,8 @@ use futures::{Stream, StreamExt};
 use crate::{
     Args,
     camera::macos_camera::MacosCamera,
-    session::SessionManager,
+    rtsp::RtspPoll,
+    session::{SessionManager, WebrtcSessionEvent},
     transport::http::{Http, HttpOutput, context::HttpContext},
 };
 
@@ -13,6 +14,7 @@ pub struct System {
     http: Http,
     sessions: SessionManager,
     camera: MacosCamera,
+    rtsp: RtspPoll,
 }
 
 impl System {
@@ -20,15 +22,13 @@ impl System {
         let (http_context, rx) = HttpContext::new(args.udp_addr);
         let http = Http::new(args.http_addr, rx, http_context).await?;
         let camera = MacosCamera::new()?;
+        let rtsp = RtspPoll::new();
         Ok(Self {
             http,
             sessions: SessionManager::new(),
             camera,
+            rtsp,
         })
-    }
-
-    fn poll_result_after_camera_rtp() -> Poll<Option<()>> {
-        Poll::Ready(Some(()))
     }
 }
 
@@ -44,35 +44,34 @@ impl Stream for System {
                     HttpOutput::Webrtc(webrtc_session) => {
                         this.sessions.insert(webrtc_session);
                     }
+                    HttpOutput::Rtsp(rtsp_session) => {
+                        this.rtsp.insert(rtsp_session);
+                    }
                 },
                 None => return Poll::Ready(None),
             }
         }
         while let Poll::Ready(out) = this.sessions.poll_next_unpin(cx) {
             match out {
-                Some(()) => {}
+                Some(event) => match event {
+                    WebrtcSessionEvent::Connected(uuid) => this.rtsp.start(uuid),
+                    WebrtcSessionEvent::Closed(uuid) => this.rtsp.stop(uuid),
+                },
                 None => return Poll::Ready(None),
             }
         }
-        while let Poll::Ready(event) = this.camera.poll_next_unpin(cx) {
+        // while let Poll::Ready(event) = this.camera.poll_next_unpin(cx) {
+        //     match event {
+        //         Some(rtp) => this.sessions.on_rtp(rtp),
+        //         None => return Poll::Ready(None),
+        //     }
+        // }
+        while let Poll::Ready(event) = this.rtsp.poll_next_unpin(cx) {
             match event {
-                Some(rtp) => {
-                    this.sessions.on_rtp(rtp);
-                    return Self::poll_result_after_camera_rtp();
-                }
+                Some((id, rtp)) => this.sessions.on_session_rtp(id, rtp),
                 None => return Poll::Ready(None),
             }
         }
         Poll::Pending
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::task::Poll;
-
-    #[test]
-    fn keeps_system_stream_alive_after_forwarding_camera_rtp() {
-        assert!(matches!(super::System::poll_result_after_camera_rtp(), Poll::Ready(Some(()))));
     }
 }

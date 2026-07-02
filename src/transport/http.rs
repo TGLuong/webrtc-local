@@ -5,7 +5,7 @@ use futures::Stream;
 use tokio::{net::TcpListener, sync::mpsc};
 use tower_http::services::ServeDir;
 
-use crate::{session::webrtc_session::WebrtcSession, transport::http::context::HttpContext};
+use crate::{rtsp::rtsp_session::RtspSession, session::webrtc_session::WebrtcSession, transport::http::context::HttpContext};
 
 pub mod api;
 pub mod context;
@@ -13,6 +13,7 @@ pub mod context;
 #[derive(Debug)]
 pub enum HttpOutput {
     Webrtc(WebrtcSession),
+    Rtsp(RtspSession),
 }
 
 #[derive(Debug)]
@@ -80,5 +81,24 @@ mod tests {
         assert!(body.contains("WebRTC stats"));
         assert!(body.contains("video element event"));
         assert!(body.contains("receiver parameters"));
+    }
+
+    #[tokio::test]
+    async fn serves_rtsp_viewer_from_html_directory() {
+        let (context, _rx) = HttpContext::new("127.0.0.1".parse().unwrap());
+        let response = super::router(context)
+            .oneshot(Request::builder().uri("/rtsp.html").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("RTSP URL"));
+        assert!(body.contains("rtsp://admin:LumiVn%402021@10.10.30.86:554/ch1/0"));
+        assert!(body.contains("/rtsp/offer"));
+        assert!(body.contains("rtsp: rtspUrl"));
+        assert!(body.contains("<video"));
     }
 }

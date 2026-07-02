@@ -30,30 +30,30 @@ pub struct MacosCamera {
 impl MacosCamera {
     pub fn new() -> anyhow::Result<Self> {
         let (tx, rx) = mpsc::channel(10);
-        tokio::task::spawn_blocking(move || {
-            nokhwa_initialize(|_| println!("camera permission granted"));
-            let index = CameraIndex::Index(0);
-            let requested = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(CameraFormat::new_from(1920, 1080, FrameFormat::YUYV, 30)));
-            if let Ok(mut camera) = Camera::new(index, requested) {
-                if let Ok(()) = camera.open_stream() {
-                    loop {
-                        match camera.frame() {
-                            Ok(frame) => match tx.blocking_send(frame) {
-                                Ok(()) => {}
-                                Err(err) => {
-                                    log::error!("[MacosCamera] channel error: {err:?}");
-                                    break;
-                                }
-                            },
-                            Err(err) => {
-                                log::error!("[MacosCamera] capture error: {err:?}");
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        });
+        // tokio::task::spawn_blocking(move || {
+        //     nokhwa_initialize(|_| println!("camera permission granted"));
+        //     let index = CameraIndex::Index(0);
+        //     let requested = RequestedFormat::new::<YuyvFormat>(RequestedFormatType::Exact(CameraFormat::new_from(1920, 1080, FrameFormat::YUYV, 30)));
+        //     if let Ok(mut camera) = Camera::new(index, requested) {
+        //         if let Ok(()) = camera.open_stream() {
+        //             loop {
+        //                 match camera.frame() {
+        //                     Ok(frame) => match tx.blocking_send(frame) {
+        //                         Ok(()) => {}
+        //                         Err(err) => {
+        //                             log::error!("[MacosCamera] channel error: {err:?}");
+        //                             break;
+        //                         }
+        //                     },
+        //                     Err(err) => {
+        //                         log::error!("[MacosCamera] capture error: {err:?}");
+        //                         break;
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     }
+        // });
         let config = EncoderConfig::new().intra_frame_period(IntraFramePeriod::from_num_frames(60));
         let api = OpenH264API::from_source();
         let encoder = Encoder::with_api_config(api, config)?;

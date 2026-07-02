@@ -13,6 +13,7 @@ use thiserror::Error;
 use tokio::{net::UdpSocket, sync::mpsc};
 
 use crate::{
+    rtsp::rtsp_session::RtspSession,
     session::webrtc_session::WebrtcSession,
     transport::http::{HttpOutput, context::HttpContext},
 };
@@ -29,6 +30,8 @@ pub enum Error {
     IOError(#[from] std::io::Error),
     #[error("channel error: {0:?}")]
     ChannelError(#[from] mpsc::error::SendError<HttpOutput>),
+    #[error("anyhow error: {0:?}")]
+    Anyhow(#[from] anyhow::Error),
 }
 
 impl IntoResponse for Error {
@@ -39,8 +42,15 @@ impl IntoResponse for Error {
             Error::IceError(ice_error) => (StatusCode::INTERNAL_SERVER_ERROR, ice_error.to_string()).into_response(),
             Error::IOError(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
             Error::ChannelError(send_error) => (StatusCode::INTERNAL_SERVER_ERROR, send_error.to_string()).into_response(),
+            Error::Anyhow(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RtspOfferRequest {
+    sdp: String,
+    rtsp: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -54,7 +64,10 @@ pub struct OfferResponse {
 }
 
 pub fn router(state: HttpContext) -> Router {
-    Router::new().route("/offer", post(offer)).with_state(state)
+    Router::new()
+        .route("/offer", post(offer))
+        .route("/rtsp/offer", post(rtsp_proxy))
+        .with_state(state)
 }
 
 fn h264_payload_type_from_sdp(sdp: &str) -> Option<u8> {
@@ -100,6 +113,23 @@ pub async fn offer(State(context): State<HttpContext>, Json(offer): Json<OfferRe
     let response = OfferResponse { sdp: answer.to_sdp_string() };
     let video_pt = h264_payload_type_from_sdp(&response.sdp).map(Pt::new_with_value);
     context.tx.send(HttpOutput::Webrtc(WebrtcSession::new(rtc, udp, address, video_pt))).await?;
+    Ok(Json(response))
+}
+
+pub async fn rtsp_proxy(State(context): State<HttpContext>, Json(offer): Json<RtspOfferRequest>) -> Result<Json<OfferResponse>, Error> {
+    let mut rtc = Rtc::builder().clear_codecs().enable_h264(true).build(Instant::now());
+    let rtsp = offer.rtsp;
+    let udp = UdpSocket::bind(SocketAddr::new(context.addr, 10000)).await?;
+    let address = udp.local_addr()?;
+    rtc.add_local_candidate(Candidate::host(address, Protocol::Udp)?);
+    let offer = SdpOffer::from_sdp_string(&offer.sdp)?;
+    let answer = rtc.sdp_api().accept_offer(offer)?;
+    let response = OfferResponse { sdp: answer.to_sdp_string() };
+    let video_pt = h264_payload_type_from_sdp(&response.sdp).map(Pt::new_with_value);
+    let webrtc_session = WebrtcSession::new(rtc, udp, address, video_pt);
+    let rtsp_session = RtspSession::new(webrtc_session.id(), rtsp).await?;
+    context.tx.send(HttpOutput::Rtsp(rtsp_session)).await?;
+    context.tx.send(HttpOutput::Webrtc(webrtc_session)).await?;
     Ok(Json(response))
 }
 

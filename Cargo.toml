@@ -24,6 +24,11 @@ serde = { version = "1.0.228", features = ["derive"] }
 str0m = "0.21.0"
 uuid = { version = "1.23.4", features = ["v7"] }
 rand = "0.10.1"
+retina = "0.4.19"
+urlencoding = "2.1.3"
+test-log = "0.2.21"
+url = "2.5.8"
+rtp = "0.17.1"
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }
